@@ -139,6 +139,7 @@ Thumbs.db
 *.log
 *.cache
 logs/
+outputs/
 
 # Temporary files
 ~$*

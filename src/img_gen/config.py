@@ -14,7 +14,7 @@ class ImageGenConfig:
     api_key: str
     base_url: str = "https://api.bltcy.ai/v1"
     model: str = "gpt-image-2-all"
-    size: str = "1024x1024"
+    size: str = "1536x1024"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
