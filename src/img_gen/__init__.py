@@ -7,6 +7,7 @@ from .client import (
     generate_image_bytes,
 )
 from .config import ImageGenConfig, load_config
+from .pipeline import generate_logo_layers
 
 __all__ = [
     "ImageGenConfig",
@@ -16,5 +17,6 @@ __all__ = [
     "generate_image",
     "generate_image_b64",
     "generate_image_bytes",
+    "generate_logo_layers",
     "load_config",
 ]

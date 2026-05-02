@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import time
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import TypeVar
 
@@ -12,6 +13,7 @@ from .config import ImageGenConfig, load_config
 
 T = TypeVar("T")
 RETRY_STATUS_CODES = {408, 409, 429}
+ReferenceImages = str | Path | list[str | Path] | tuple[str | Path, ...] | None
 
 
 def create_client(config: ImageGenConfig | None = None) -> OpenAI:
@@ -60,8 +62,12 @@ def _extract_first_image_b64(response: object) -> str:
     return image_b64
 
 
+def _decode_image_response(response: object) -> bytes:
+    return base64.b64decode(_extract_first_image_b64(response))
+
+
 def _normalize_reference_images(
-    reference_images: str | Path | list[str | Path] | tuple[str | Path, ...] | None,
+    reference_images: ReferenceImages,
 ) -> list[Path]:
     if reference_images is None:
         return []
@@ -77,6 +83,36 @@ def _normalize_reference_images(
         raise FileNotFoundError(f"参考图不存在: {', '.join(missing)}")
 
     return normalized
+
+
+def _request_image_edit(
+    image_paths: list[Path],
+    prompt: str,
+    *,
+    config: ImageGenConfig | None = None,
+    model: str | None = None,
+    size: str | None = None,
+    n: int = 1,
+    collapse_single_image: bool = False,
+) -> object:
+    resolved = config or load_config()
+    client = create_client(resolved)
+
+    with ExitStack() as stack:
+        opened_files = [stack.enter_context(path.open("rb")) for path in image_paths]
+        image_input = (
+            opened_files[0]
+            if collapse_single_image and len(opened_files) == 1
+            else opened_files
+        )
+        return client.images.edit(
+            model=model or resolved.model,
+            image=image_input,
+            prompt=prompt,
+            n=n,
+            size=size or resolved.size,
+            response_format="b64_json",
+        )
 
 
 def generate_image_b64(
@@ -115,16 +151,15 @@ def generate_image_bytes(
     max_retries: int = 3,
     retry_delay: float = 5.0,
 ) -> bytes:
-    return base64.b64decode(
-        generate_image_b64(
-            prompt,
-            config=config,
-            model=model,
-            size=size,
-            max_retries=max_retries,
-            retry_delay=retry_delay,
-        )
+    image_b64 = generate_image_b64(
+        prompt,
+        config=config,
+        model=model,
+        size=size,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
     )
+    return base64.b64decode(image_b64)
 
 
 def edit_image_b64(
@@ -138,22 +173,16 @@ def edit_image_b64(
     max_retries: int = 3,
     retry_delay: float = 5.0,
 ) -> str:
-    resolved = config or load_config()
-    client = create_client(resolved)
-
-    def request_edit() -> object:
-        with Path(image_path).open("rb") as image_file:
-            return client.images.edit(
-                model=model or resolved.model,
-                image=image_file,
-                prompt=prompt,
-                n=n,
-                size=size or resolved.size,
-                response_format="b64_json",
-            )
-
     response = _with_retries(
-        request_edit,
+        lambda: _request_image_edit(
+            [Path(image_path).expanduser()],
+            prompt,
+            config=config,
+            model=model,
+            size=size,
+            n=n,
+            collapse_single_image=True,
+        ),
         max_retries=max_retries,
         retry_delay=retry_delay,
     )
@@ -170,22 +199,21 @@ def edit_image_bytes(
     max_retries: int = 3,
     retry_delay: float = 5.0,
 ) -> bytes:
-    return base64.b64decode(
-        edit_image_b64(
-            image_path,
-            prompt,
-            config=config,
-            model=model,
-            size=size,
-            max_retries=max_retries,
-            retry_delay=retry_delay,
-        )
+    image_b64 = edit_image_b64(
+        image_path,
+        prompt,
+        config=config,
+        model=model,
+        size=size,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
     )
+    return base64.b64decode(image_b64)
 
 
 def generate_image(
     prompt: str,
-    reference_images: str | Path | list[str | Path] | tuple[str | Path, ...] | None = None,
+    reference_images: ReferenceImages = None,
     *,
     config: ImageGenConfig | None = None,
     model: str | None = None,
@@ -205,27 +233,16 @@ def generate_image(
             retry_delay=retry_delay,
         )
 
-    resolved = config or load_config()
-    client = create_client(resolved)
-
-    def request_edit() -> object:
-        opened_files = [path.open("rb") for path in references]
-        try:
-            return client.images.edit(
-                model=model or resolved.model,
-                image=opened_files,
-                prompt=prompt,
-                n=n,
-                size=size or resolved.size,
-                response_format="b64_json",
-            )
-        finally:
-            for image_file in opened_files:
-                image_file.close()
-
     response = _with_retries(
-        request_edit,
+        lambda: _request_image_edit(
+            references,
+            prompt,
+            config=config,
+            model=model,
+            size=size,
+            n=n,
+        ),
         max_retries=max_retries,
         retry_delay=retry_delay,
     )
-    return base64.b64decode(_extract_first_image_b64(response))
+    return _decode_image_response(response)
