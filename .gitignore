@@ -190,3 +190,6 @@ web/coverage/
 desktop/node_modules/
 desktop/build/
 desktop/release/
+inputs/
+outputs/
+logs/
