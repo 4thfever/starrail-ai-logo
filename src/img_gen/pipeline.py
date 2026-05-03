@@ -27,13 +27,15 @@ IMAGE_SIZE = "1536x1024"
 TEXT_WIDTH_RATIO = 0.88
 DEFAULT_REFERENCE_TEXT = "未提供参考文字；如果有外部参考图，请主要参考外部参考图。"
 KEY_COLORS = (
+    ("#00FF00", (0, 255, 0)),
     ("#FF00FF", (255, 0, 255)),
-    ("#00FFFF", (0, 255, 255)),
 )
 KEY_BACKGROUND_MIN_RATIO = 0.82
 KEY_BACKGROUND_DISTANCE = 70
-KEY_ALPHA_HARD_DISTANCE = 42
-KEY_ALPHA_SOFT_DISTANCE = 150
+KEY_ALPHA_HARD_DISTANCE = 55
+KEY_ALPHA_SOFT_DISTANCE = 210
+KEY_SPILL_DISTANCE = 250
+KEY_SPILL_STRENGTH = 0.9
 
 
 @dataclass(frozen=True)
@@ -181,6 +183,34 @@ def _smoothstep(value: float) -> float:
     return value * value * (3.0 - 2.0 * value)
 
 
+def _remove_key_spill(
+    red: int,
+    green: int,
+    blue: int,
+    key_rgb: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    channels = [red, green, blue]
+    key_channels = [index for index, value in enumerate(key_rgb) if value >= 250]
+    non_key_channels = [index for index in range(3) if index not in key_channels]
+    if not key_channels or not non_key_channels:
+        return red, green, blue
+
+    spill_distance = (_color_distance_sq((red, green, blue), key_rgb)) ** 0.5
+    if spill_distance >= KEY_SPILL_DISTANCE:
+        return red, green, blue
+
+    spill_factor = KEY_SPILL_STRENGTH * _smoothstep(
+        (KEY_SPILL_DISTANCE - spill_distance) / KEY_SPILL_DISTANCE
+    )
+    non_key_max = max(channels[index] for index in non_key_channels)
+    for index in key_channels:
+        allowed = non_key_max
+        if channels[index] > allowed:
+            channels[index] = int(round(channels[index] * (1 - spill_factor) + allowed * spill_factor))
+
+    return channels[0], channels[1], channels[2]
+
+
 def remove_key_background(
     image: Image.Image,
     key_rgb: tuple[int, int, int],
@@ -219,6 +249,7 @@ def remove_key_background(
             green = max(0, min(255, green))
             blue = max(0, min(255, blue))
 
+        red, green, blue = _remove_key_spill(red, green, blue, key_rgb)
         output.append((red, green, blue, alpha))
 
     cutout = Image.new("RGBA", rgba.size)
@@ -317,7 +348,7 @@ async def generate_logo_layers(
     text_spec = LAYER_SPECS["text"]
 
     if progress_callback is not None:
-        progress_callback(0.14, desc="并行生成背景层和洋红 Key 文字层")
+        progress_callback(0.14, desc="并行生成背景层和绿幕 Key 文字层")
     background_task = asyncio.create_task(
         generate_layer_to_file(
             background_spec,
@@ -337,7 +368,7 @@ async def generate_logo_layers(
     except KeyBackgroundError as exc:
         key_error = exc
         if progress_callback is not None:
-            progress_callback(0.72, desc="洋红背景不合格，改用纯青 Key 重试")
+            progress_callback(0.72, desc="绿幕背景不合格，改用洋红 Key 重试")
         raw_text_path, text_path, key_hex, key_rgb = await generate_text_layer_with_key(
             text_spec,
             reference_text,
