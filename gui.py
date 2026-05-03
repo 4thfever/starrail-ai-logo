@@ -7,7 +7,7 @@ except ImportError as exc:  # pragma: no cover - shown only when running the app
 
 from PIL import Image
 
-from src.img_gen.pipeline import ASSETS_DIR, OUTPUTS_DIR, generate_logo_layers
+from src.img_gen.pipeline import ASSETS_DIR, LOGS_DIR, OUTPUTS_DIR, generate_logo_layers
 
 CSS = """
 .hint {
@@ -95,4 +95,4 @@ def build_app() -> gr.Blocks:
 
 if __name__ == "__main__":
     app = build_app()
-    app.launch(css=CSS, allowed_paths=[str(OUTPUTS_DIR), str(ASSETS_DIR)])
+    app.launch(css=CSS, allowed_paths=[str(OUTPUTS_DIR), str(LOGS_DIR), str(ASSETS_DIR)])
